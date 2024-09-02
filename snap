@@ -1,0 +1,140 @@
+#!/bin/sh
+#
+# Author: Rob Hamilton
+#
+
+PATH=/sbin:/usr/sbin:/usr/local/sbin:/bin:/usr/bin:/usr/local/bin
+progname=`basename $0`
+
+thiszfs=$(df  .|tail -1 |awk '{print $1}')
+thismount=$(df  .|tail -1 |awk '{print $NF}')
+thispwd=$(pwd -P)
+
+usage() {
+
+  cat <<EOF
+    usage:
+    $progname [-n (dryrun)] cmd
+    eg.
+    $progname list [snapshot matchexpr]  (show snapshots)
+    $progname cat [snapshot matchexpr] 
+    $progname ls [lsargs] snapname[:relpath] (ls files in snapshots(
+    $progname [diff|get] [args] snap:relpath (diff or cp from(
+    $progname create|destroy snapshot
+    NB path is relative, -n is dry run.
+    ls/cat/diff/get (= one way cp) can take any args
+EOF
+    exit 1
+}
+
+dryrun=false
+
+while getopts "hn" opt ; do
+    case $opt in
+	n)
+	    dryrun=true
+	    echo 'dryrun only. nothing changed on disk'
+	    ;;
+	h)
+	    usage
+	    ;;
+    esac
+done
+
+shift $((OPTIND-1))
+
+# "now" handy to create an hour tagged snapshot if no snapshot name guven1`
+now=`date +%H`
+
+case $1 in 
+    list)
+	if [ ! -z "$2" ] ; then 
+	    zfs list -t snapshot -H|grep "$2"
+	else  
+	    zfs list -t snapshot -H
+	fi
+	;;
+
+    create)
+	what=$2
+	if [ -z "$2" ] ; then
+	    what=$now
+	fi
+	if $dryrun ; then
+      echo would do:
+	    echo zfs snapshot  ${thiszfs}@$what
+	else
+	    zfs snapshot  ${thiszfs}@$what
+	fi
+	;;
+
+    destroy)
+	what=$2
+	if [ -z "$2" ] ; then
+	    echo no fs specified. try -h
+	    exit 1
+	fi
+	if $dryrun ; then
+	    echo would do:
+	    echo zfs destroy  ${thiszfs}@$what
+	else
+	    zfs destroy  ${thiszfs}@$what
+	fi
+	;;
+    ls|get|diff|cat) 
+	prog=$1
+	arg=""
+	case $2 in
+	    -*)
+		arg="$2"
+		shift
+		;;
+	esac
+	if [ "$1" = "ls" -a -z "$2" ] ; then # special for ls just show snaps
+	    what=${thismount}/.zfs/snapshot/
+	    echo $what
+	    ls $arg $what
+	    exit 0
+	fi
+	snapname=$(echo $2|awk -F:  '{print $1}')
+	if [ -z "$snapname" ] ; then
+	    echo no snapshot given try -h
+	    exit 1
+	fi
+	what=$(echo $2|awk -F:  '{print $2}')
+	where=$(ruby -e "print \"${thispwd}\".delete_prefix(\"${thismount}\")" )
+	tail=""
+	case $prog in
+    cat)
+      tail=""
+      cmd="cat"
+      ;;
+	    get)
+		tail="."
+		cmd="cp"
+		;;
+	    ls)
+		tail=""
+		cmd="ls"
+		;;
+	    diff)
+		tail="$what"
+		cmd="diff"
+		;;
+	    *)
+		unexpected command $prog
+		exit 1
+	esac
+	if $dryrun ; then 
+	    echo would do:
+	    echo "$cmd $arg "${thismount}/.zfs/snapshot/$snapname/$where/$what" $tail"
+	else
+	    $cmd $arg "${thismount}/.zfs/snapshot/$snapname/$where/$what" $tail
+	fi
+	;;
+    *)
+	usage
+	;;
+esac
+
+

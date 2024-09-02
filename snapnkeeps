@@ -1,0 +1,51 @@
+#!/bin/sh
+PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/local/bin
+
+# number of hourly snapshots to keep
+ZFS=tank/home
+N=10 
+PREFIX=""
+R=""
+progname=`basename $0`
+dryrun=false
+
+usage() {
+  cat <<EOF
+usage: $progname [-n] [-h] [-r] [-p prefix] [-z filesysten] [-k number_to_keep]
+EOF
+exit
+}
+
+doit() {
+  if $dryrun ; then
+    echo "$@"
+  else
+    echo "$@"
+    "$@"
+  fi
+}
+
+while getopts "nhrz:p:k:" opt ; do
+  case $opt in
+    n) dryrun=true ; echo dryrun only nothing changed on disk ;;
+    h) usage ;;
+    p) PREFIX=$OPTARG ;;
+    z) ZFS=$OPTARG ;;
+    k) N=$OPTARG ;;
+		r) R="-r" ;;
+    *) usage ;;
+  esac
+done
+
+shift $((OPTIND-1))
+
+doit zfs destroy $R ${ZFS}@${PREFIX}${N}
+
+n=$(($N - 1))
+while [ ${n} -ge 0 ] ; do
+  doit zfs rename $R ${ZFS}@${PREFIX}${n} @${PREFIX}$(($n + 1))
+  n=$(($n - 1))
+done
+
+doit zfs snapshot $R  ${ZFS}@${PREFIX}0
+
